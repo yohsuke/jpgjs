@@ -352,12 +352,21 @@ var JpegImage = (function jpegImage() {
     return offset - startOffset;
   }
 
+  function integrateHighFreq(block){
+    var p=0;
+     for(var i=32; i<64; i++){
+     	p += Math.abs(block[dctZigZag[i]]);
+     }
+     return p;
+  }
+
   // A port of poppler's IDCT method which in turn is taken from:
   //   Christoph Loeffler, Adriaan Ligtenberg, George S. Moschytz,
   //   "Practical Fast 1-D DCT Algorithms with 11 Multiplications",
   //   IEEE Intl. Conf. on Acoustics, Speech & Signal Processing, 1989,
   //   988-991.
-  function quantizeAndInverse(component, blockBufferOffset, p) {
+  function quantizeAndInverse(component, blockRow, blockCol, p) {
+    var blockBufferOffset = getBlockBufferOffset(component, blockRow, blockCol);
     var qt = component.quantizationTable;
     var v0, v1, v2, v3, v4, v5, v6, v7, t;
     var i;
@@ -366,6 +375,7 @@ var JpegImage = (function jpegImage() {
     for (i = 0; i < 64; i++) {
       p[i] = component.blockData[blockBufferOffset + i] * qt[i];
     }
+    var px=integrateHighFreq(p);
 
     // inverse DCT on rows
     for (i = 0; i < 8; ++i) {
@@ -512,6 +522,10 @@ var JpegImage = (function jpegImage() {
       q = (q <= -2056) ? 0 : (q >= 2024) ? 255 : (q + 2056) >> 4;
       component.blockData[index] = q;
     }
+    component.highFrequency.xValue += px * blockCol;
+    component.highFrequency.yValue += px * blockRow;
+    component.highFrequency.xPos += px;
+    component.highFrequency.yPos += px;
   }
 
   function buildComponentData(frame, component) {
@@ -524,8 +538,7 @@ var JpegImage = (function jpegImage() {
     var i, j, ll = 0;
     for (var blockRow = 0; blockRow < blocksPerColumn; blockRow++) {
       for (var blockCol = 0; blockCol < blocksPerLine; blockCol++) {
-        var offset = getBlockBufferOffset(component, blockRow, blockCol)
-        quantizeAndInverse(component, offset, computationBuffer);
+        quantizeAndInverse(component, blockRow, blockCol, computationBuffer);
       }
     }
     return component.blockData;
@@ -594,6 +607,7 @@ var JpegImage = (function jpegImage() {
           component.blockData = new Int16Array(blocksBufferSize);
           component.blocksPerLine = blocksPerLine;
           component.blocksPerColumn = blocksPerColumn;
+          component.highFrequency = {xPos:0, xValue:0, yPos:0, yValue: 0};
         }
         frame.mcusPerLine = mcusPerLine;
         frame.mcusPerColumn = mcusPerColumn;
@@ -790,6 +804,10 @@ var JpegImage = (function jpegImage() {
           output: buildComponentData(frame, component),
           scaleX: component.h / frame.maxH,
           scaleY: component.v / frame.maxV,
+          contentBlock: {
+            x:Math.floor(component.highFrequency.xValue / component.highFrequency.xPos),
+            y:Math.floor(component.highFrequency.yValue / component.highFrequency.yPos)
+          },
           blocksPerLine: component.blocksPerLine,
           blocksPerColumn: component.blocksPerColumn
         });
@@ -972,6 +990,24 @@ var JpegImage = (function jpegImage() {
         default:
           throw 'Unsupported color mode';
       }
+    },
+    getContentBlock: function getContentBlock() {
+       // only Y component is used.
+       return this.components[0].contentBlock;
+    },
+    geContentCropPosition: function geContentCropPosition(rate) {
+      var center=this.getContentBlock();
+      var x=center.x*8+4,y=center.y*8+4;
+      var width=this.width, height=this.height;
+      if(width/height < rate){
+        height=width/rate;
+      }else{
+        width=height*rate;
+      }
+      x=Math.max(x-width/2,0), y=Math.max(y-height/2,0);
+      x=Math.min(this.width-width, x);
+      y=Math.min(this.height-height, y); 
+      return {x:x, y:y, width:width, height:height};
     }
   };
 

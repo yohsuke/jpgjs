@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="jpg.js"></script>
+<script src="jpg-debug.js"></script>
+<script>
+
+function copy(j,c,scale){
+    c.width=j.width*scale;
+    c.height=j.height*scale;
+    var ctx = c.getContext("2d");
+    var d = ctx.getImageData(0,0,j.width*scale,j.height*scale);
+    j.copyToImageData(d);
+    ctx.putImageData(d,0,0);
+}
+
+function cropCenter(j,c,width,height){
+    c.width=width;
+    c.height=height;
+    var ctx = c.getContext("2d");
+    var d = ctx.getImageData(0,0,j.width,j.height);
+    j.copyToImageData(d);
+    ctx.putImageData(d,-(j.width-width)/2, -(j.height-height)/2);
+}
+
+function cropWithContent(j,c,width,height){
+    c.width=width;
+    c.height=height;
+    var ctx = c.getContext("2d");
+    var d = ctx.getImageData(0,0,j.width,j.height);
+    j.copyToImageData(d);
+    var center=j.getContentBlock();
+    ctx.putImageData(d,-center.x*8+width/2, -center.y*8+height/2);
+}
+
+function displayImage() {
+  var j = new JpegImage();
+  j.onload = function() {
+    copy(j,document.getElementById("c1"), 1);
+    cropCenter(j,document.getElementById("c2"),300,300);
+    cropWithContent(j,document.getElementById("c3"),300,300);
+
+    var jd = new DebugJpegImage();
+    jd.onload = function() {
+      copy(jd,document.getElementById("cd1"), 1);
+      {
+        var c = document.getElementById("cd2")
+        c.width = jd.width;
+        c.height = jd.height;
+        var ctx = c.getContext("2d");
+        var d = ctx.getImageData(0,0,c.width,c.height);
+        jd.copyToHighFrequencyData(d);
+        ctx.putImageData(d, 0, 0);
+
+        var center = j.getContentBlock();
+        ctx.beginPath();
+        ctx.fillStyle = 'rgb(192, 80, 77)';
+        ctx.fillRect(center.x*8-4,center.y*8-4,16,16);
+      }
+    }
+    jd.load("photo.jpg");
+  };
+  j.load("photo.jpg");
+}
+
+
+</script>
+</head>
+<body onload="displayImage()">
+<canvas id="c1"></canvas>
+<table>
+<tr><th>crop center</th><th>crop content</th></tr>
+<tr><td><canvas id="c2"/></td><td><canvas id="c3"/></td></tr>
+</table>
+<hr>
+<canvas id="cd1"></canvas>
+<canvas id="cd2"></canvas>
+</body></html>
