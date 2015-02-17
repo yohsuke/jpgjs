@@ -352,12 +352,21 @@ var DebugJpegImage = (function jpegImage() {
     return offset - startOffset;
   }
 
+  function integrateHighFreq(block){
+    var p=0;
+     for(var i=32; i<64; i++){
+     	p += Math.abs(block[dctZigZag[i]]);
+     }
+     return p;
+  }
+
   // A port of poppler's IDCT method which in turn is taken from:
   //   Christoph Loeffler, Adriaan Ligtenberg, George S. Moschytz,
   //   "Practical Fast 1-D DCT Algorithms with 11 Multiplications",
   //   IEEE Intl. Conf. on Acoustics, Speech & Signal Processing, 1989,
   //   988-991.
-  function quantizeAndInverse(component, blockBufferOffset, p) {
+  function quantizeAndInverse(component, blockRow, blockCol, p) {
+    var blockBufferOffset = getBlockBufferOffset(component, blockRow, blockCol);
     var qt = component.quantizationTable;
     var v0, v1, v2, v3, v4, v5, v6, v7, t;
     var i;
@@ -366,6 +375,7 @@ var DebugJpegImage = (function jpegImage() {
     for (i = 0; i < 64; i++) {
       p[i] = component.blockData[blockBufferOffset + i] * qt[i];
     }
+    var px=integrateHighFreq(p);
 
     // inverse DCT on rows
     for (i = 0; i < 8; ++i) {
@@ -510,8 +520,14 @@ var DebugJpegImage = (function jpegImage() {
       var index = blockBufferOffset + i;
       var q = p[i];
       q = (q <= -2056) ? 0 : (q >= 2024) ? 255 : (q + 2056) >> 4;
-      component.blockData[index] = q;
+      component.blockData[i] = q;
     }
+    var pos=blockRow * component.blocksPerLine + blockCol;
+    component.freqPointX += px * blockCol;
+    component.freqPointY += px * blockRow;
+    component.freqX += px;
+    component.freqY += px;
+    component.highFrequencyBlockData[pos]=px;
   }
 
   function buildComponentData(frame, component) {
@@ -524,8 +540,7 @@ var DebugJpegImage = (function jpegImage() {
     var i, j, ll = 0;
     for (var blockRow = 0; blockRow < blocksPerColumn; blockRow++) {
       for (var blockCol = 0; blockCol < blocksPerLine; blockCol++) {
-        var offset = getBlockBufferOffset(component, blockRow, blockCol)
-        quantizeAndInverse(component, offset, computationBuffer);
+        quantizeAndInverse(component, blockRow, blockCol, computationBuffer);
       }
     }
     return component.blockData;
@@ -534,6 +549,26 @@ var DebugJpegImage = (function jpegImage() {
   function clampToUint8(a) {
     return a <= 0 ? 0 : a >= 255 ? 255 : a | 0;
   }
+
+  function renderTo(canvas, image, data) {
+      var imageDataBytes = image.width * image.height * 4;
+      var imageDataArray = canvas.data;
+      var blocksPerLine = image.components[0].blocksPerLine;
+
+      var j = 0;
+      for (var y = 0; y < image.height; y++) {
+        for (var x = 0; x < image.width; x++) {
+          var cy = 0 | y/8;
+          var cx = 0 | x/8;
+          var index = cy * blocksPerLine + cx;
+          var d=data[index];
+          imageDataArray[j++] = d;
+          imageDataArray[j++] = d;
+          imageDataArray[j++] = d;
+          imageDataArray[j++] = 255;
+        }
+      }
+   }
 
   constructor.prototype = {
     load: function load(path) {
@@ -594,6 +629,8 @@ var DebugJpegImage = (function jpegImage() {
           component.blockData = new Int16Array(blocksBufferSize);
           component.blocksPerLine = blocksPerLine;
           component.blocksPerColumn = blocksPerColumn;
+          component.dctBlockData = new Int16Array(blocksBufferSize);
+          component.highFrequencyBlockData = new Int16Array(blocksPerLine*blocksPerColumn);
         }
         frame.mcusPerLine = mcusPerLine;
         frame.mcusPerColumn = mcusPerColumn;
@@ -788,6 +825,8 @@ var DebugJpegImage = (function jpegImage() {
         var component = frame.components[i];
         this.components.push({
           output: buildComponentData(frame, component),
+          highFrequencyOutput: component.highFrequencyBlockData,
+          dctOutput: component.dctBlockData,
           scaleX: component.h / frame.maxH,
           scaleY: component.v / frame.maxV,
           blocksPerLine: component.blocksPerLine,
@@ -918,6 +957,10 @@ var DebugJpegImage = (function jpegImage() {
       }
       return data;
     },
+
+    copyToHighFrequencyData: function copyToHighFrequencyData(imageData) {
+      renderTo(imageData, this, this.components[0].highFrequencyOutput);
+   },
     copyToImageData: function copyToImageData(imageData) {
       var width = imageData.width, height = imageData.height;
       var imageDataBytes = width * height * 4;
